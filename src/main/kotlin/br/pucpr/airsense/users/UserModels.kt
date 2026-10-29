@@ -41,24 +41,29 @@ class User(
 
 data class CreateUserRequest(
     @field:NotBlank(message = "O nome é obrigatório")
+    @field:Size(max = 100, message = "O nome deve ter no máximo 100 caracteres")
     val name: String,
 
+    @field:Size(max = 150, message = "O e-mail deve ter no máximo 150 caracteres")
     @field:Email(message = "E-mail inválido")
     @field:NotBlank(message = "O e-mail é obrigatório")
     val email: String,
 
-    @field:Size(min = 6, message = "A senha deve ter pelo menos 6 caracteres")
+    // BCrypt só considera os primeiros 72 bytes da senha
+    @field:NotBlank(message = "A senha é obrigatória")
+    @field:Size(min = 6, max = 72, message = "A senha deve ter entre 6 e 72 caracteres")
     val password: String
 )
 
 data class UpdateUserRequest(
     @field:NotBlank(message = "O nome é obrigatório")
+    @field:Size(max = 100, message = "O nome deve ter no máximo 100 caracteres")
     val name: String
 )
 
 data class LoginRequest(
-    @field:NotBlank val username: String,
-    @field:NotBlank val password: String
+    @field:NotBlank(message = "O e-mail é obrigatório") val username: String,
+    @field:NotBlank(message = "A senha é obrigatória") val password: String
 )
 
 data class UserResponse(

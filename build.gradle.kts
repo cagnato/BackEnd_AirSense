@@ -14,7 +14,6 @@ java {
 		languageVersion = JavaLanguageVersion.of(21)
 	}
 }
-
 repositories {
 	mavenCentral()
 }
@@ -44,7 +43,14 @@ dependencies {
 	testImplementation("org.springframework.security:spring-security-test")
 }
 
+allOpen {
+	annotation("jakarta.persistence.Entity")
+	annotation("jakarta.persistence.MappedSuperclass")
+	annotation("jakarta.persistence.Embeddable")
+}
+
 kotlin {
+	jvmToolchain(21) // Add this line
 	compilerOptions {
 		freeCompilerArgs.addAll("-Xjsr305=strict")
 	}

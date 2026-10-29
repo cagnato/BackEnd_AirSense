@@ -11,9 +11,18 @@ spring:
     hibernate:
       ddl-auto: update
     show-sql: true
+    open-in-view: true
   h2:
     console:
       enabled: true
 
 server:
   port: 8080
+
+airsense:
+  admin:
+    email: admin@airsense.com
+    password: admin123
+  jwt:
+    # Mínimo de 32 caracteres (HS256). Troque fora do ambiente local.
+    secret: chave-secreta-airsense-pucpr-muito-segura-256bits

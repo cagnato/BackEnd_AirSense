@@ -1,53 +1,52 @@
 package br.pucpr.airsense.environments
 
-import br.pucpr.airsense.exception.BadRequestException
+import br.pucpr.airsense.common.buildSort
+import br.pucpr.airsense.devices.DeviceRepository
 import br.pucpr.airsense.exception.NotFoundException
+import br.pucpr.airsense.users.UserRepository
 import org.slf4j.LoggerFactory
-import org.springframework.data.domain.Sort
-import org.springframework.data.repository.findByIdOrNull
 import org.springframework.stereotype.Service
+import org.springframework.transaction.annotation.Transactional
 
 @Service
+@Transactional
 class EnvironmentService(
     private val environmentRepository: EnvironmentRepository,
-    private val roomRepository: RoomRepository
+    private val roomRepository: RoomRepository,
+    private val deviceRepository: DeviceRepository,
+    private val userRepository: UserRepository
 ) {
     private val log = LoggerFactory.getLogger(EnvironmentService::class.java)
 
-    fun create(req: EnvironmentRequest): EnvironmentResponse {
+    companion object {
+        private val SORT_FIELDS = setOf("id", "name", "city")
+    }
+
+    fun create(ownerId: Long, req: EnvironmentRequest): EnvironmentResponse {
         val env = Environment(
             name = req.name,
             description = req.description,
-            city = req.city
+            city = req.city,
+            owner = userRepository.getReferenceById(ownerId)
         )
         val saved = environmentRepository.save(env)
-        log.info("Ambiente Macro criado: id={}, name={}", saved.id, saved.name)
+        log.info("Ambiente Macro criado: id={}, name={}, owner={}", saved.id, saved.name, ownerId)
         return EnvironmentResponse(saved)
     }
 
-    fun search(name: String?, city: String?, sortBy: String, sortDir: String): List<EnvironmentResponse> {
-        val allowedSortFields = setOf("id", "name", "city")
-        if (sortBy !in allowedSortFields) {
-            throw BadRequestException("Campo de ordenação inválido: $sortBy. Use: $allowedSortFields")
-        }
-
-        val direction = if (sortDir.equals("desc", ignoreCase = true)) Sort.Direction.DESC else Sort.Direction.ASC
-        val sort = Sort.by(direction, sortBy)
-
-        return environmentRepository.findWithFilters(name, city, sort)
+    @Transactional(readOnly = true)
+    fun search(ownerId: Long, name: String?, city: String?, sortBy: String, sortDir: String): List<EnvironmentResponse> {
+        val sort = buildSort(sortBy, sortDir, SORT_FIELDS)
+        return environmentRepository.findWithFilters(ownerId, name, city, sort)
             .map { EnvironmentResponse(it) }
     }
 
-    fun findById(id: Long): EnvironmentResponse {
-        val env = environmentRepository.findByIdOrNull(id)
-            ?: throw NotFoundException("Ambiente com id=$id não encontrado")
-        return EnvironmentResponse(env)
-    }
+    @Transactional(readOnly = true)
+    fun findById(ownerId: Long, id: Long): EnvironmentResponse =
+        EnvironmentResponse(findOwned(ownerId, id))
 
-    fun update(id: Long, req: EnvironmentRequest): EnvironmentResponse {
-        val env = environmentRepository.findByIdOrNull(id)
-            ?: throw NotFoundException("Ambiente com id=$id não encontrado")
-
+    fun update(ownerId: Long, id: Long, req: EnvironmentRequest): EnvironmentResponse {
+        val env = findOwned(ownerId, id)
         env.name = req.name
         env.description = req.description
         env.city = req.city
@@ -57,40 +56,67 @@ class EnvironmentService(
         return EnvironmentResponse(saved)
     }
 
-    fun delete(id: Long) {
-        if (!environmentRepository.existsById(id)) {
-            throw NotFoundException("Ambiente com id=$id não encontrado")
+    fun delete(ownerId: Long, id: Long) {
+        val env = findOwned(ownerId, id)
+        // Devices deste ambiente não são apagados, só ficam sem ambiente e sem room
+        env.rooms.forEach { room -> unbindDevices(room.id!!) }
+        deviceRepository.findAllByEnvironmentId(id).forEach {
+            it.room = null
+            it.environment = null
         }
-        environmentRepository.deleteById(id)
+        environmentRepository.delete(env)
         log.info("Ambiente removido: id={}", id)
     }
 
-    fun addRoom(environmentId: Long, req: RoomRequest): EnvironmentResponse {
-        val env = environmentRepository.findByIdOrNull(environmentId)
-            ?: throw NotFoundException("Ambiente com id=$environmentId não encontrado")
+    // --- Cômodos (Rooms) ---
 
-        val room = Room(
-            name = req.name,
-            areaM2 = req.areaM2,
-            environment = env
-        )
+    fun addRoom(ownerId: Long, environmentId: Long, req: RoomRequest): RoomResponse {
+        val env = findOwned(ownerId, environmentId)
+        val room = roomRepository.save(Room(name = req.name, areaM2 = req.areaM2, environment = env))
         env.rooms.add(room)
-        val saved = environmentRepository.save(env)
         log.info("Cômodo '{}' adicionado ao ambiente id={}", req.name, environmentId)
-        return EnvironmentResponse(saved)
+        return RoomResponse(room)
     }
 
-    fun removeRoom(environmentId: Long, roomId: Long): EnvironmentResponse {
-        val env = environmentRepository.findByIdOrNull(environmentId)
-            ?: throw NotFoundException("Ambiente com id=$environmentId não encontrado")
+    @Transactional(readOnly = true)
+    fun listRooms(ownerId: Long, environmentId: Long): List<RoomResponse> {
+        findOwned(ownerId, environmentId)
+        return roomRepository.findAllByEnvironmentId(environmentId).map { RoomResponse(it) }
+    }
 
-        val removed = env.rooms.removeIf { it.id == roomId }
-        if (!removed) {
+    fun updateRoom(ownerId: Long, environmentId: Long, roomId: Long, req: RoomRequest): RoomResponse {
+        val room = findOwnedRoom(ownerId, environmentId, roomId)
+        room.name = req.name
+        room.areaM2 = req.areaM2
+        val saved = roomRepository.save(room)
+        log.info("Cômodo id={} atualizado no ambiente id={}", roomId, environmentId)
+        return RoomResponse(saved)
+    }
+
+    fun removeRoom(ownerId: Long, environmentId: Long, roomId: Long) {
+        val env = findOwned(ownerId, environmentId)
+        val room = env.rooms.find { it.id == roomId }
+            ?: throw NotFoundException("Cômodo id=$roomId não encontrado neste ambiente")
+        unbindDevices(roomId) // continuam no ambiente, só sem room
+        env.rooms.remove(room) // orphanRemoval apaga o cômodo
+        log.info("Cômodo id={} removido do ambiente id={}", roomId, environmentId)
+    }
+
+    // --- Auxiliares ---
+
+    private fun findOwned(ownerId: Long, id: Long): Environment =
+        environmentRepository.findByIdAndOwnerId(id, ownerId)
+            ?: throw NotFoundException("Ambiente com id=$id não encontrado")
+
+    private fun findOwnedRoom(ownerId: Long, environmentId: Long, roomId: Long): Room {
+        val room = roomRepository.findByIdAndEnvironmentOwnerId(roomId, ownerId)
+        if (room == null || room.environment?.id != environmentId) {
             throw NotFoundException("Cômodo id=$roomId não encontrado neste ambiente")
         }
+        return room
+    }
 
-        val saved = environmentRepository.save(env)
-        log.info("Cômodo id={} removido do ambiente id={}", roomId, environmentId)
-        return EnvironmentResponse(saved)
+    private fun unbindDevices(roomId: Long) {
+        deviceRepository.findAllByRoomId(roomId).forEach { it.room = null }
     }
 }

@@ -11,17 +11,23 @@ import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder
 import org.springframework.security.crypto.password.PasswordEncoder
 import org.springframework.security.web.SecurityFilterChain
 import org.springframework.security.web.authentication.www.BasicAuthenticationFilter
+import org.springframework.security.web.util.matcher.AntPathRequestMatcher.antMatcher
 import org.springframework.web.cors.CorsConfiguration
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource
 import org.springframework.web.filter.CorsFilter
 
 @Configuration
 @EnableMethodSecurity
-class SecurityConfig(private val jwtTokenFilter: JwtTokenFilter) {
+class SecurityConfig(
+    private val jwtTokenFilter: JwtTokenFilter,
+    private val restSecurityHandlers: RestSecurityHandlers
+) {
 
     @Bean
     fun passwordEncoder(): PasswordEncoder = BCryptPasswordEncoder()
 
+    // antMatcher explícito: o console do H2 registra um segundo servlet, e o Spring Security
+    // não aceita matchers de String ambíguos nesse cenário.
     @Bean
     fun filterChain(security: HttpSecurity): SecurityFilterChain =
         security
@@ -29,15 +35,26 @@ class SecurityConfig(private val jwtTokenFilter: JwtTokenFilter) {
             .csrf { it.disable() }
             .sessionManagement { it.sessionCreationPolicy(STATELESS) }
             .headers { headers -> headers.frameOptions { it.disable() } } // Permite o H2 Console
+            .exceptionHandling {
+                it.authenticationEntryPoint(restSecurityHandlers)
+                it.accessDeniedHandler(restSecurityHandlers)
+            }
             .authorizeHttpRequests { requests ->
                 requests
-                    // Rotas utilitárias (H2 e Swagger)
-                    .requestMatchers("/h2-console/**", "/v3/api-docs/**", "/swagger-ui/**").permitAll()
-                    // Rotas públicas de autenticação e registo
-                    .requestMatchers(HttpMethod.POST, "/users", "/users/login").permitAll()
-                    // Consultas públicas (GET)
-                    .requestMatchers(HttpMethod.GET, "/users/**", "/environments/**", "/devices/**").permitAll()
-                    // Ações destrutivas (DELETE/PUT) e restantes rotas exigem Token JWT válido
+                    // Rotas utilitárias (H2, Swagger e página de erro)
+                    .requestMatchers(
+                        antMatcher("/h2-console/**"),
+                        antMatcher("/v3/api-docs/**"),
+                        antMatcher("/swagger-ui/**"),
+                        antMatcher("/swagger-ui.html"),
+                        antMatcher("/error")
+                    ).permitAll()
+                    // Rotas públicas: cadastro e login
+                    .requestMatchers(
+                        antMatcher(HttpMethod.POST, "/users"),
+                        antMatcher(HttpMethod.POST, "/users/login")
+                    ).permitAll()
+                    // Todo o resto exige token JWT válido
                     .anyRequest().authenticated()
             }
             .addFilterBefore(jwtTokenFilter, BasicAuthenticationFilter::class.java)

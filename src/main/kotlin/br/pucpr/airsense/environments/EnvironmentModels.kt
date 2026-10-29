@@ -1,8 +1,11 @@
 package br.pucpr.airsense.environments
 
+import br.pucpr.airsense.users.User
 import jakarta.persistence.*
 import jakarta.validation.constraints.NotBlank
+import jakarta.validation.constraints.DecimalMax
 import jakarta.validation.constraints.Positive
+import jakarta.validation.constraints.Size
 
 @Entity
 @Table(name = "tbl_environments")
@@ -19,10 +22,15 @@ class Environment(
     @Column(nullable = false)
     var city: String = "",
 
+    @ManyToOne(fetch = FetchType.LAZY, optional = false)
+    @JoinColumn(name = "owner_id", nullable = false)
+    var owner: User? = null,
+
     @OneToMany(mappedBy = "environment", cascade = [CascadeType.ALL], orphanRemoval = true)
     val rooms: MutableList<Room> = mutableListOf()
 )
 
+// O dono do Room é o dono do Environment ao qual ele pertence.
 @Entity
 @Table(name = "tbl_rooms")
 class Room(
@@ -44,20 +52,25 @@ class Room(
 
 data class EnvironmentRequest(
     @field:NotBlank(message = "O nome do ambiente é obrigatório")
+    @field:Size(max = 100, message = "O nome deve ter no máximo 100 caracteres")
     val name: String,
 
     @field:NotBlank(message = "A descrição é obrigatória")
+    @field:Size(max = 255, message = "A descrição deve ter no máximo 255 caracteres")
     val description: String,
 
     @field:NotBlank(message = "A cidade é obrigatória")
+    @field:Size(max = 100, message = "A cidade deve ter no máximo 100 caracteres")
     val city: String
 )
 
 data class RoomRequest(
     @field:NotBlank(message = "O nome do cômodo é obrigatório")
+    @field:Size(max = 100, message = "O nome deve ter no máximo 100 caracteres")
     val name: String,
 
     @field:Positive(message = "A área em m² deve ser maior que zero")
+    @field:DecimalMax(value = "100000.0", message = "A área deve ser de no máximo 100000 m²")
     val areaM2: Double
 )
 
