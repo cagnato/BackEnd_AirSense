@@ -24,9 +24,9 @@ class EnvironmentService(
 
     fun create(ownerId: Long, req: EnvironmentRequest): EnvironmentResponse {
         val env = Environment(
-            name = req.name,
-            description = req.description,
-            city = req.city,
+            name = req.name.trim(),
+            description = req.description.trim(),
+            city = req.city.trim(),
             owner = userRepository.getReferenceById(ownerId)
         )
         val saved = environmentRepository.save(env)
@@ -47,9 +47,9 @@ class EnvironmentService(
 
     fun update(ownerId: Long, id: Long, req: EnvironmentRequest): EnvironmentResponse {
         val env = findOwned(ownerId, id)
-        env.name = req.name
-        env.description = req.description
-        env.city = req.city
+        env.name = req.name.trim()
+        env.description = req.description.trim()
+        env.city = req.city.trim()
 
         val saved = environmentRepository.save(env)
         log.info("Ambiente atualizado: id={}", saved.id)
@@ -72,7 +72,7 @@ class EnvironmentService(
 
     fun addRoom(ownerId: Long, environmentId: Long, req: RoomRequest): RoomResponse {
         val env = findOwned(ownerId, environmentId)
-        val room = roomRepository.save(Room(name = req.name, areaM2 = req.areaM2, environment = env))
+        val room = roomRepository.save(Room(name = req.name.trim(), areaM2 = req.areaM2, environment = env))
         env.rooms.add(room)
         log.info("Cômodo '{}' adicionado ao ambiente id={}", req.name, environmentId)
         return RoomResponse(room)
@@ -86,7 +86,7 @@ class EnvironmentService(
 
     fun updateRoom(ownerId: Long, environmentId: Long, roomId: Long, req: RoomRequest): RoomResponse {
         val room = findOwnedRoom(ownerId, environmentId, roomId)
-        room.name = req.name
+        room.name = req.name.trim()
         room.areaM2 = req.areaM2
         val saved = roomRepository.save(room)
         log.info("Cômodo id={} atualizado no ambiente id={}", roomId, environmentId)
