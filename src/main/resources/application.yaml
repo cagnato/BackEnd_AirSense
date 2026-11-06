@@ -17,12 +17,12 @@ spring:
       enabled: true
 
 server:
-  port: 8080
+  port: ${PORT:8080}
 
 airsense:
   admin:
-    email: admin@airsense.com
-    password: admin123
+    email: ${ADMIN_EMAIL:admin@airsense.com}
+    password: ${ADMIN_PASSWORD:admin123}
   jwt:
-    # Mínimo de 32 caracteres (HS256). Troque fora do ambiente local.
-    secret: chave-secreta-airsense-pucpr-muito-segura-256bits
+    # Mínimo de 32 caracteres (HS256). Em produção, defina JWT_SECRET no ambiente.
+    secret: ${JWT_SECRET:chave-secreta-airsense-pucpr-muito-segura-256bits}
