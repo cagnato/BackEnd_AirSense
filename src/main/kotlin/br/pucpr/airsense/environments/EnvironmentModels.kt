@@ -1,5 +1,6 @@
 package br.pucpr.airsense.environments
 
+import br.pucpr.airsense.users.User
 import jakarta.persistence.*
 import jakarta.validation.constraints.NotBlank
 import jakarta.validation.constraints.Positive
@@ -20,7 +21,11 @@ class Environment(
     var city: String = "",
 
     @OneToMany(mappedBy = "environment", cascade = [CascadeType.ALL], orphanRemoval = true)
-    val rooms: MutableList<Room> = mutableListOf()
+    val rooms: MutableList<Room> = mutableListOf(),
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "owner_id")
+    var owner: User? = null,
 )
 
 @Entity

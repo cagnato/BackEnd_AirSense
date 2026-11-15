@@ -3,14 +3,17 @@ package br.pucpr.airsense.devices
 import br.pucpr.airsense.environments.RoomRepository
 import br.pucpr.airsense.exception.ConflictException
 import br.pucpr.airsense.exception.NotFoundException
+import br.pucpr.airsense.reports.ReportRepository // <-- NOVO (BK.21)
 import org.slf4j.LoggerFactory
 import org.springframework.data.repository.findByIdOrNull
 import org.springframework.stereotype.Service
+import org.springframework.transaction.annotation.Transactional // <-- NOVO (BK.21)
 
 @Service
 class DeviceService(
     private val deviceRepository: DeviceRepository,
-    private val roomRepository: RoomRepository
+    private val roomRepository: RoomRepository,
+    private val reportRepository: ReportRepository // <-- NOVO (BK.21)
 ) {
     private val log = LoggerFactory.getLogger(DeviceService::class.java)
 
@@ -62,10 +65,12 @@ class DeviceService(
         return DeviceResponse(saved)
     }
 
+    @Transactional // <-- NOVO (BK.21)
     fun delete(id: Long) {
         if (!deviceRepository.existsById(id)) {
             throw NotFoundException("Dispositivo com id=$id não encontrado")
         }
+        reportRepository.unlinkDevice(id) // <-- NOVO (BK.21 - D33: deixa vínculo nulo nos relatórios)
         deviceRepository.deleteById(id)
         log.info("Dispositivo id={} excluído", id)
     }

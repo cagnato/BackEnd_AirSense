@@ -1,6 +1,7 @@
 package br.pucpr.airsense.devices
 
 import br.pucpr.airsense.environments.Room
+import br.pucpr.airsense.users.User
 import jakarta.persistence.*
 import jakarta.validation.constraints.NotBlank
 
@@ -24,7 +25,11 @@ class Device(
 
     @OneToOne
     @JoinColumn(name = "room_id", unique = true)
-    var room: Room? = null
+    var room: Room? = null,
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "owner_id")
+    var owner: User? = null,
 )
 
 data class DeviceRequest(

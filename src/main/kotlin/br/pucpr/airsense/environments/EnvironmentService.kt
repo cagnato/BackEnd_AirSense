@@ -1,18 +1,24 @@
 package br.pucpr.airsense.environments
 
-import br.pucpr.airsense.exception.BadRequestException
+import br.pucpr.airsense.common.buildSort
 import br.pucpr.airsense.exception.NotFoundException
+import br.pucpr.airsense.reports.ReportRepository // <-- NOVO (BK.21)
 import org.slf4j.LoggerFactory
-import org.springframework.data.domain.Sort
 import org.springframework.data.repository.findByIdOrNull
 import org.springframework.stereotype.Service
+import org.springframework.transaction.annotation.Transactional // <-- NOVO (BK.21)
 
 @Service
 class EnvironmentService(
     private val environmentRepository: EnvironmentRepository,
-    private val roomRepository: RoomRepository
+    private val roomRepository: RoomRepository,
+    private val reportRepository: ReportRepository // <-- NOVO (BK.21)
 ) {
     private val log = LoggerFactory.getLogger(EnvironmentService::class.java)
+
+    companion object {
+        private val ALLOWED_SORT_FIELDS = setOf("id", "name", "city")
+    }
 
     fun create(req: EnvironmentRequest): EnvironmentResponse {
         val env = Environment(
@@ -26,14 +32,7 @@ class EnvironmentService(
     }
 
     fun search(name: String?, city: String?, sortBy: String, sortDir: String): List<EnvironmentResponse> {
-        val allowedSortFields = setOf("id", "name", "city")
-        if (sortBy !in allowedSortFields) {
-            throw BadRequestException("Campo de ordenação inválido: $sortBy. Use: $allowedSortFields")
-        }
-
-        val direction = if (sortDir.equals("desc", ignoreCase = true)) Sort.Direction.DESC else Sort.Direction.ASC
-        val sort = Sort.by(direction, sortBy)
-
+        val sort = buildSort(sortBy, sortDir, ALLOWED_SORT_FIELDS)
         return environmentRepository.findWithFilters(name, city, sort)
             .map { EnvironmentResponse(it) }
     }
@@ -57,11 +56,18 @@ class EnvironmentService(
         return EnvironmentResponse(saved)
     }
 
+    @Transactional // <-- NOVO (BK.21)
     fun delete(id: Long) {
-        if (!environmentRepository.existsById(id)) {
-            throw NotFoundException("Ambiente com id=$id não encontrado")
+        val env = environmentRepository.findByIdOrNull(id)
+            ?: throw NotFoundException("Ambiente com id=$id não encontrado")
+
+        // <-- NOVO (BK.21 - D33: deixa vínculo nulo nos relatórios antes de apagar cômodos e ambiente)
+        env.rooms.forEach { room ->
+            room.id?.let { reportRepository.unlinkRoom(it) }
         }
-        environmentRepository.deleteById(id)
+        reportRepository.unlinkEnvironment(id)
+
+        environmentRepository.delete(env)
         log.info("Ambiente removido: id={}", id)
     }
 
@@ -80,14 +86,18 @@ class EnvironmentService(
         return EnvironmentResponse(saved)
     }
 
+    @Transactional // <-- NOVO (BK.21)
     fun removeRoom(environmentId: Long, roomId: Long): EnvironmentResponse {
         val env = environmentRepository.findByIdOrNull(environmentId)
             ?: throw NotFoundException("Ambiente com id=$environmentId não encontrado")
 
-        val removed = env.rooms.removeIf { it.id == roomId }
-        if (!removed) {
+        val exists = env.rooms.any { it.id == roomId }
+        if (!exists) {
             throw NotFoundException("Cômodo id=$roomId não encontrado neste ambiente")
         }
+
+        reportRepository.unlinkRoom(roomId) // <-- NOVO (BK.21 - D33: deixa vínculo nulo nos relatórios)
+        env.rooms.removeIf { it.id == roomId }
 
         val saved = environmentRepository.save(env)
         log.info("Cômodo id={} removido do ambiente id={}", roomId, environmentId)

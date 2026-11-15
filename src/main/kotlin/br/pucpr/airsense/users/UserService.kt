@@ -3,19 +3,22 @@ package br.pucpr.airsense.users
 import br.pucpr.airsense.exception.ConflictException
 import br.pucpr.airsense.exception.NotFoundException
 import br.pucpr.airsense.exception.UnauthorizedException
+import br.pucpr.airsense.reports.ReportRepository // <-- NOVO (BK.21)
 import br.pucpr.airsense.security.Jwt
 import br.pucpr.airsense.security.UserToken
 import org.slf4j.LoggerFactory
 import org.springframework.data.repository.findByIdOrNull
 import org.springframework.security.crypto.password.PasswordEncoder
 import org.springframework.stereotype.Service
+import org.springframework.transaction.annotation.Transactional // <-- NOVO (BK.21)
 
 @Service
 class UserService(
     private val userRepository: UserRepository,
     private val roleRepository: RoleRepository,
     private val passwordEncoder: PasswordEncoder,
-    private val jwt: Jwt
+    private val jwt: Jwt,
+    private val reportRepository: ReportRepository // <-- NOVO (BK.21)
 ) {
     private val log = LoggerFactory.getLogger(UserService::class.java)
 
@@ -78,10 +81,12 @@ class UserService(
         return UserResponse(saved)
     }
 
+    @Transactional // <-- NOVO (BK.21)
     fun delete(id: Long) {
         if (!userRepository.existsById(id)) {
             throw NotFoundException("Usuário com id=$id não encontrado")
         }
+        reportRepository.deleteAllByOwnerId(id) // <-- NOVO (BK.21: apaga relatórios do usuário antes)
         userRepository.deleteById(id)
         log.info("Usuário removido: id={}", id)
     }
