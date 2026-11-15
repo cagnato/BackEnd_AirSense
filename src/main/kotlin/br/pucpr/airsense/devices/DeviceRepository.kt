@@ -9,7 +9,11 @@ import org.springframework.stereotype.Repository
 @Repository
 interface DeviceRepository : JpaRepository<Device, Long> {
 
-    fun existsByDeviceId(deviceId: String): Boolean
+    // deviceId repetido no sistema todo (sem diferenciar maiúsculas)
+
+    fun existsByDeviceIdIgnoreCase(deviceId: String): Boolean
+
+    fun existsByDeviceIdIgnoreCaseAndIdNot(deviceId: String, id: Long): Boolean
 
     fun findByIdAndOwnerId(id: Long, ownerId: Long): Device?
 

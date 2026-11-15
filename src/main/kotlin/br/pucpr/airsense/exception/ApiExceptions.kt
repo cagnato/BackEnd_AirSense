@@ -11,4 +11,5 @@ class NotFoundException(message: String) : ApiException(message, HttpStatus.NOT_
 class BadRequestException(message: String) : ApiException(message, HttpStatus.BAD_REQUEST)
 class ConflictException(message: String) : ApiException(message, HttpStatus.CONFLICT)
 class UnauthorizedException(message: String = "Credenciais inválidas") : ApiException(message, HttpStatus.UNAUTHORIZED)
+class LockedException(message: String) : ApiException(message, HttpStatus.LOCKED)
 class ForbiddenException(message: String = "Acesso negado") : ApiException(message, HttpStatus.FORBIDDEN)

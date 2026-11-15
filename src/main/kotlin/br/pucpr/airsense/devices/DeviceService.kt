@@ -28,6 +28,7 @@ class DeviceService(
         private val SORT_FIELDS = setOf("id", "name", "deviceId", "status", "environment")
         // Ordenado em memória: devices sem ambiente vão para o fim, como no app.
         private const val SORT_ENVIRONMENT = "environment"
+        private const val DEVICE_ID_CONFLICT = "Dispositivo já cadastrado."
 
         fun generateDeviceId(): String =
             "DEV-" + UUID.randomUUID().toString().replace("-", "").take(8).uppercase()
@@ -37,8 +38,8 @@ class DeviceService(
         validateRanges(req)
 
         val deviceId = req.deviceId?.trim().takeUnless { it.isNullOrEmpty() } ?: generateDeviceId()
-        if (deviceRepository.existsByDeviceId(deviceId)) {
-            throw ConflictException("Já existe um dispositivo cadastrado com o deviceId $deviceId")
+        if (deviceRepository.existsByDeviceIdIgnoreCase(deviceId)) {
+            throw ConflictException(DEVICE_ID_CONFLICT)
         }
 
         val device = Device(deviceId = deviceId, owner = userRepository.getReferenceById(ownerId))
@@ -86,8 +87,8 @@ class DeviceService(
         // deviceId vazio no update mantém o atual
         val newDeviceId = req.deviceId?.trim().takeUnless { it.isNullOrEmpty() }
         if (newDeviceId != null && newDeviceId != device.deviceId) {
-            if (deviceRepository.existsByDeviceId(newDeviceId)) {
-                throw ConflictException("Já existe um dispositivo cadastrado com o deviceId $newDeviceId")
+            if (deviceRepository.existsByDeviceIdIgnoreCaseAndIdNot(newDeviceId, id)) {
+                throw ConflictException(DEVICE_ID_CONFLICT)
             }
             device.deviceId = newDeviceId
         }

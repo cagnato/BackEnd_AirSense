@@ -13,18 +13,21 @@ interface EnvironmentRepository : JpaRepository<Environment, Long> {
         SELECT e FROM Environment e
         WHERE e.owner.id = :ownerId
           AND (:name IS NULL OR LOWER(e.name) LIKE LOWER(CONCAT('%', :name, '%')))
-          AND (:city IS NULL OR LOWER(e.city) LIKE LOWER(CONCAT('%', :city, '%')))
     """)
     fun findWithFilters(
         @Param("ownerId") ownerId: Long,
         @Param("name") name: String?,
-        @Param("city") city: String?,
         sort: Sort
     ): List<Environment>
 
     fun findByIdAndOwnerId(id: Long, ownerId: Long): Environment?
 
     fun findAllByOwnerId(ownerId: Long): List<Environment>
+
+    // Nome repetido do mesmo dono
+    fun existsByOwnerIdAndNameIgnoreCase(ownerId: Long, name: String): Boolean
+
+    fun existsByOwnerIdAndNameIgnoreCaseAndIdNot(ownerId: Long, name: String, id: Long): Boolean
 }
 
 @Repository
@@ -34,4 +37,9 @@ interface RoomRepository : JpaRepository<Room, Long> {
 
     // Busca o cômodo garantindo que ele pertence a um ambiente do dono informado.
     fun findByIdAndEnvironmentOwnerId(id: Long, ownerId: Long): Room?
+
+    // Nome repetido no mesmo ambiente (sem diferenciar maiúsculas)
+    fun existsByEnvironmentIdAndNameIgnoreCase(environmentId: Long, name: String): Boolean
+
+    fun existsByEnvironmentIdAndNameIgnoreCaseAndIdNot(environmentId: Long, name: String, id: Long): Boolean
 }

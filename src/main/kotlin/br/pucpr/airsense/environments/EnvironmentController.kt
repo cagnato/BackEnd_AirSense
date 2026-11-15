@@ -21,12 +21,11 @@ class EnvironmentController(private val environmentService: EnvironmentService) 
     @GetMapping
     fun search(
         @RequestParam(required = false) name: String?,
-        @RequestParam(required = false) city: String?,
         @RequestParam(defaultValue = "name") sortBy: String,
         @RequestParam(defaultValue = "asc") sortDir: String,
         @AuthenticationPrincipal user: UserToken
     ): ResponseEntity<List<EnvironmentResponse>> =
-        ResponseEntity.ok(environmentService.search(user.id, name, city, sortBy, sortDir))
+        ResponseEntity.ok(environmentService.search(user.id, name, sortBy, sortDir))
 
     @GetMapping("/{id}")
     fun findById(

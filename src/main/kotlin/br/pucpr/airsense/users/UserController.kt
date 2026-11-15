@@ -44,6 +44,16 @@ class UserController(private val userService: UserService) {
     ): ResponseEntity<UserResponse> =
         ResponseEntity.ok(userService.update(id, req, user))
 
+    @PutMapping("/{id}/password")
+    fun changePassword(
+        @PathVariable id: Long,
+        @Valid @RequestBody req: ChangePasswordRequest,
+        @AuthenticationPrincipal user: UserToken
+    ): ResponseEntity<Void> {
+        userService.changePassword(id, req, user)
+        return ResponseEntity.noContent().build()
+    }
+
     @DeleteMapping("/{id}")
     fun delete(
         @PathVariable id: Long,

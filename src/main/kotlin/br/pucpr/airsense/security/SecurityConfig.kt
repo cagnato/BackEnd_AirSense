@@ -49,8 +49,9 @@ class SecurityConfig(
                         antMatcher("/swagger-ui.html"),
                         antMatcher("/error")
                     ).permitAll()
-                    // Rotas públicas: cadastro e login
+                    // Rotas públicas: health check, cadastro e login
                     .requestMatchers(
+                        antMatcher(HttpMethod.GET, "/health"),
                         antMatcher(HttpMethod.POST, "/users"),
                         antMatcher(HttpMethod.POST, "/users/login")
                     ).permitAll()

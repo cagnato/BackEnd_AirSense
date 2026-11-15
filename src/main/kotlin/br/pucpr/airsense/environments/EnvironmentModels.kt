@@ -2,6 +2,7 @@ package br.pucpr.airsense.environments
 
 import br.pucpr.airsense.users.User
 import jakarta.persistence.*
+import org.hibernate.annotations.ColumnDefault
 import jakarta.validation.constraints.NotBlank
 import jakarta.validation.constraints.DecimalMax
 import jakarta.validation.constraints.Positive
@@ -16,11 +17,8 @@ class Environment(
     @Column(nullable = false)
     var name: String = "",
 
-    @Column(nullable = false)
+    @Column(nullable = true)
     var description: String = "",
-
-    @Column(nullable = false)
-    var city: String = "",
 
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
     @JoinColumn(name = "owner_id", nullable = false)
@@ -41,6 +39,10 @@ class Room(
     var name: String = "",
 
     @Column(nullable = false)
+    @ColumnDefault("''")
+    var description: String = "",
+
+    @Column(nullable = false)
     var areaM2: Double = 0.0,
 
     @ManyToOne(fetch = FetchType.LAZY)
@@ -55,19 +57,18 @@ data class EnvironmentRequest(
     @field:Size(max = 100, message = "O nome deve ter no máximo 100 caracteres")
     val name: String,
 
-    @field:NotBlank(message = "A descrição é obrigatória")
     @field:Size(max = 255, message = "A descrição deve ter no máximo 255 caracteres")
     val description: String,
-
-    @field:NotBlank(message = "A cidade é obrigatória")
-    @field:Size(max = 100, message = "A cidade deve ter no máximo 100 caracteres")
-    val city: String
 )
 
 data class RoomRequest(
     @field:NotBlank(message = "O nome do cômodo é obrigatório")
     @field:Size(max = 100, message = "O nome deve ter no máximo 100 caracteres")
     val name: String,
+
+    // Opcional: sem descrição, fica vazia
+    @field:Size(max = 255, message = "A descrição deve ter no máximo 255 caracteres")
+    val description: String = "",
 
     @field:Positive(message = "A área em m² deve ser maior que zero")
     @field:DecimalMax(value = "100000.0", message = "A área deve ser de no máximo 100000 m²")
@@ -77,12 +78,14 @@ data class RoomRequest(
 data class RoomResponse(
     val id: Long,
     val name: String,
+    val description: String,
     val areaM2: Double,
     val environmentId: Long
 ) {
     constructor(room: Room) : this(
         id = room.id!!,
         name = room.name,
+        description = room.description,
         areaM2 = room.areaM2,
         environmentId = room.environment?.id ?: 0L
     )
@@ -92,14 +95,12 @@ data class EnvironmentResponse(
     val id: Long,
     val name: String,
     val description: String,
-    val city: String,
     val rooms: List<RoomResponse>
 ) {
     constructor(env: Environment) : this(
         id = env.id!!,
         name = env.name,
         description = env.description,
-        city = env.city,
         rooms = env.rooms.map { RoomResponse(it) }
     )
 }

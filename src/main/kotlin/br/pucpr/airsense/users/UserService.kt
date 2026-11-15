@@ -3,7 +3,10 @@ package br.pucpr.airsense.users
 import br.pucpr.airsense.BootStrapper
 import br.pucpr.airsense.devices.DeviceRepository
 import br.pucpr.airsense.environments.EnvironmentRepository
+import br.pucpr.airsense.exception.ApiException
+import br.pucpr.airsense.exception.BadRequestException
 import br.pucpr.airsense.exception.ConflictException
+import br.pucpr.airsense.exception.LockedException
 import br.pucpr.airsense.exception.NotFoundException
 import br.pucpr.airsense.exception.UnauthorizedException
 import br.pucpr.airsense.security.Jwt
@@ -13,6 +16,8 @@ import org.springframework.data.repository.findByIdOrNull
 import org.springframework.security.crypto.password.PasswordEncoder
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
+import java.time.Duration
+import java.time.Instant
 
 @Service
 @Transactional
@@ -26,10 +31,19 @@ class UserService(
 ) {
     private val log = LoggerFactory.getLogger(UserService::class.java)
 
+    companion object {
+        private const val EMAIL_CONFLICT = "E-mail já cadastrado."
+        private const val INVALID_CREDENTIALS = "E-mail ou senha inválidos."
+        private const val ACCOUNT_LOCKED =
+            "Acesso bloqueado por 15 minutos após 5 tentativas inválidas. O bloqueio é temporário; tente novamente mais tarde."
+        private const val MAX_FAILED_ATTEMPTS = 5
+        private val LOCK_DURATION: Duration = Duration.ofMinutes(15)
+    }
+
     fun create(req: CreateUserRequest): UserResponse {
         val email = normalizeEmail(req.email)
         if (userRepository.existsByEmail(email)) {
-            throw ConflictException("Já existe um usuário cadastrado com o e-mail $email")
+            throw ConflictException(EMAIL_CONFLICT)
         }
 
         val defaultRole = roleRepository.findByIdOrNull(BootStrapper.ROLE_USER)
@@ -47,13 +61,39 @@ class UserService(
         return UserResponse(saved)
     }
 
+    // Sem rollback nas recusas: o contador de tentativas precisa ser gravado mesmo com o erro.
+    @Transactional(noRollbackFor = [ApiException::class])
     fun login(req: LoginRequest): LoginResponse {
         val user = userRepository.findByEmail(normalizeEmail(req.username))
-            ?: throw UnauthorizedException("Usuário ou senha inválidos")
+            ?: throw UnauthorizedException(INVALID_CREDENTIALS)
+
+        val now = Instant.now()
+        val lockedUntil = user.lockedUntil
+        if (lockedUntil != null && lockedUntil.isAfter(now)) {
+            log.warn("Login recusado, conta bloqueada até {}: userId={}", lockedUntil, user.id)
+            throw LockedException(ACCOUNT_LOCKED)
+        }
 
         if (!passwordEncoder.matches(req.password, user.password)) {
-            log.warn("Tentativa de login inválida para o email={}", req.username)
-            throw UnauthorizedException("Usuário ou senha inválidos")
+            // Na 5ª senha errada seguida, bloqueia por 15 minutos e zera o contador.
+            val attempts = user.failedLoginAttempts + 1
+            if (attempts >= MAX_FAILED_ATTEMPTS) {
+                user.failedLoginAttempts = 0
+                user.lockedUntil = now.plus(LOCK_DURATION)
+                userRepository.save(user)
+                log.warn("Conta bloqueada por {} tentativas inválidas: userId={}", MAX_FAILED_ATTEMPTS, user.id)
+                throw LockedException(ACCOUNT_LOCKED)
+            }
+            user.failedLoginAttempts = attempts
+            userRepository.save(user)
+            log.warn("Tentativa de login inválida ({}/{}) para o email={}", attempts, MAX_FAILED_ATTEMPTS, req.username)
+            throw UnauthorizedException(INVALID_CREDENTIALS)
+        }
+
+        if (user.failedLoginAttempts > 0 || user.lockedUntil != null) {
+            user.failedLoginAttempts = 0
+            user.lockedUntil = null
+            userRepository.save(user)
         }
 
         val userToken = UserToken(
@@ -78,10 +118,26 @@ class UserService(
 
     fun update(id: Long, req: UpdateUserRequest, requester: UserToken): UserResponse {
         val user = findAccessible(id, requester)
+        req.email?.let { normalizeEmail(it) }?.let { email ->
+            if (userRepository.existsByEmailAndIdNot(email, id)) {
+                throw ConflictException(EMAIL_CONFLICT)
+            }
+            user.email = email
+        }
         user.name = req.name.trim()
         val saved = userRepository.save(user)
         log.info("Usuário atualizado: id={}", saved.id)
         return UserResponse(saved)
+    }
+
+    fun changePassword(id: Long, req: ChangePasswordRequest, requester: UserToken) {
+        val user = findAccessible(id, requester)
+        if (!passwordEncoder.matches(req.currentPassword, user.password)) {
+            throw BadRequestException("Senha atual incorreta")
+        }
+        user.password = passwordEncoder.encode(req.newPassword)
+        userRepository.save(user)
+        log.info("Senha alterada: userId={}", id)
     }
 
     fun delete(id: Long, requester: UserToken) {

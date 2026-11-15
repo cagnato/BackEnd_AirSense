@@ -2,6 +2,8 @@ package br.pucpr.airsense.environments
 
 import br.pucpr.airsense.common.buildSort
 import br.pucpr.airsense.devices.DeviceRepository
+import br.pucpr.airsense.exception.BadRequestException
+import br.pucpr.airsense.exception.ConflictException
 import br.pucpr.airsense.exception.NotFoundException
 import br.pucpr.airsense.users.UserRepository
 import org.slf4j.LoggerFactory
@@ -19,14 +21,20 @@ class EnvironmentService(
     private val log = LoggerFactory.getLogger(EnvironmentService::class.java)
 
     companion object {
-        private val SORT_FIELDS = setOf("id", "name", "city")
+        private val SORT_FIELDS = setOf("id", "name")
+        private const val ENV_NAME_CONFLICT = "Já existe um ambiente cadastrado com este nome"
+        private const val ENV_NAME_MIN_LENGTH = 2
+        private const val ROOM_NAME_CONFLICT = "Já existe um cômodo com este nome neste ambiente"
     }
 
     fun create(ownerId: Long, req: EnvironmentRequest): EnvironmentResponse {
+        val name = validEnvironmentName(req.name)
+        if (environmentRepository.existsByOwnerIdAndNameIgnoreCase(ownerId, name)) {
+            throw ConflictException(ENV_NAME_CONFLICT)
+        }
         val env = Environment(
-            name = req.name,
-            description = req.description,
-            city = req.city,
+            name = name,
+            description = req.description.trim(),
             owner = userRepository.getReferenceById(ownerId)
         )
         val saved = environmentRepository.save(env)
@@ -35,9 +43,9 @@ class EnvironmentService(
     }
 
     @Transactional(readOnly = true)
-    fun search(ownerId: Long, name: String?, city: String?, sortBy: String, sortDir: String): List<EnvironmentResponse> {
+    fun search(ownerId: Long, name: String?, sortBy: String, sortDir: String): List<EnvironmentResponse> {
         val sort = buildSort(sortBy, sortDir, SORT_FIELDS)
-        return environmentRepository.findWithFilters(ownerId, name, city, sort)
+        return environmentRepository.findWithFilters(ownerId, name, sort)
             .map { EnvironmentResponse(it) }
     }
 
@@ -47,9 +55,12 @@ class EnvironmentService(
 
     fun update(ownerId: Long, id: Long, req: EnvironmentRequest): EnvironmentResponse {
         val env = findOwned(ownerId, id)
-        env.name = req.name
-        env.description = req.description
-        env.city = req.city
+        val name = validEnvironmentName(req.name)
+        if (environmentRepository.existsByOwnerIdAndNameIgnoreCaseAndIdNot(ownerId, name, id)) {
+            throw ConflictException(ENV_NAME_CONFLICT)
+        }
+        env.name = name
+        env.description = req.description.trim()
 
         val saved = environmentRepository.save(env)
         log.info("Ambiente atualizado: id={}", saved.id)
@@ -72,9 +83,15 @@ class EnvironmentService(
 
     fun addRoom(ownerId: Long, environmentId: Long, req: RoomRequest): RoomResponse {
         val env = findOwned(ownerId, environmentId)
-        val room = roomRepository.save(Room(name = req.name, areaM2 = req.areaM2, environment = env))
+        val name = req.name.trim()
+        if (roomRepository.existsByEnvironmentIdAndNameIgnoreCase(environmentId, name)) {
+            throw ConflictException(ROOM_NAME_CONFLICT)
+        }
+        val room = roomRepository.save(
+            Room(name = name, description = req.description.trim(), areaM2 = req.areaM2, environment = env)
+        )
         env.rooms.add(room)
-        log.info("Cômodo '{}' adicionado ao ambiente id={}", req.name, environmentId)
+        log.info("Cômodo '{}' adicionado ao ambiente id={}", name, environmentId)
         return RoomResponse(room)
     }
 
@@ -86,7 +103,12 @@ class EnvironmentService(
 
     fun updateRoom(ownerId: Long, environmentId: Long, roomId: Long, req: RoomRequest): RoomResponse {
         val room = findOwnedRoom(ownerId, environmentId, roomId)
-        room.name = req.name
+        val name = req.name.trim()
+        if (roomRepository.existsByEnvironmentIdAndNameIgnoreCaseAndIdNot(environmentId, name, roomId)) {
+            throw ConflictException(ROOM_NAME_CONFLICT)
+        }
+        room.name = name
+        room.description = req.description.trim()
         room.areaM2 = req.areaM2
         val saved = roomRepository.save(room)
         log.info("Cômodo id={} atualizado no ambiente id={}", roomId, environmentId)
@@ -103,6 +125,15 @@ class EnvironmentService(
     }
 
     // --- Auxiliares ---
+
+    // Nome sem espaços nas pontas e com pelo menos 2 caracteres (igual ao app)
+    private fun validEnvironmentName(raw: String): String {
+        val name = raw.trim()
+        if (name.length < ENV_NAME_MIN_LENGTH) {
+            throw BadRequestException("O nome deve ter pelo menos $ENV_NAME_MIN_LENGTH caracteres")
+        }
+        return name
+    }
 
     private fun findOwned(ownerId: Long, id: Long): Environment =
         environmentRepository.findByIdAndOwnerId(id, ownerId)
