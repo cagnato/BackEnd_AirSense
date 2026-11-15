@@ -11,6 +11,7 @@ import br.pucpr.airsense.exception.NotFoundException
 import br.pucpr.airsense.exception.UnauthorizedException
 import br.pucpr.airsense.security.Jwt
 import br.pucpr.airsense.security.UserToken
+import br.pucpr.airsense.reports.ReportRepository
 import org.slf4j.LoggerFactory
 import org.springframework.data.repository.findByIdOrNull
 import org.springframework.security.crypto.password.PasswordEncoder
@@ -27,7 +28,8 @@ class UserService(
     private val environmentRepository: EnvironmentRepository,
     private val deviceRepository: DeviceRepository,
     private val passwordEncoder: PasswordEncoder,
-    private val jwt: Jwt
+    private val jwt: Jwt,
+    private val reportRepository: ReportRepository
 ) {
     private val log = LoggerFactory.getLogger(UserService::class.java)
 
@@ -147,6 +149,7 @@ class UserService(
             throw ConflictException("Não é possível remover o último administrador do sistema")
         }
         // Remove primeiro o que pertence ao usuário, para não violar as FKs de owner
+        reportRepository.deleteAllByOwnerId(id) // relatórios apontam para devices/ambientes do usuário
         deviceRepository.deleteAll(deviceRepository.findAllByOwnerId(id))
         environmentRepository.deleteAll(environmentRepository.findAllByOwnerId(id))
         userRepository.delete(user)

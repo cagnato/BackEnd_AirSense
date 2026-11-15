@@ -7,6 +7,7 @@ import br.pucpr.airsense.exception.BadRequestException
 import br.pucpr.airsense.exception.ConflictException
 import br.pucpr.airsense.exception.NotFoundException
 import br.pucpr.airsense.users.UserRepository
+import br.pucpr.airsense.reports.ReportRepository
 import org.slf4j.LoggerFactory
 import org.springframework.data.domain.Sort
 import org.springframework.stereotype.Service
@@ -19,7 +20,8 @@ class DeviceService(
     private val deviceRepository: DeviceRepository,
     private val environmentRepository: EnvironmentRepository,
     private val roomRepository: RoomRepository,
-    private val userRepository: UserRepository
+    private val userRepository: UserRepository,
+    private val reportRepository: ReportRepository
 ) {
     private val log = LoggerFactory.getLogger(DeviceService::class.java)
 
@@ -121,7 +123,9 @@ class DeviceService(
     }
 
     fun delete(ownerId: Long, id: Long) {
-        deviceRepository.delete(findOwned(ownerId, id))
+        val device = findOwned(ownerId, id)
+        reportRepository.unlinkDevice(id) // D33: relatórios mantêm o nome, sem o vínculo
+        deviceRepository.delete(device)
         log.info("Dispositivo id={} excluído", id)
     }
 

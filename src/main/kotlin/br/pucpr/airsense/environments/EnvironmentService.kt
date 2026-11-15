@@ -6,6 +6,7 @@ import br.pucpr.airsense.exception.BadRequestException
 import br.pucpr.airsense.exception.ConflictException
 import br.pucpr.airsense.exception.NotFoundException
 import br.pucpr.airsense.users.UserRepository
+import br.pucpr.airsense.reports.ReportRepository
 import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
@@ -16,7 +17,8 @@ class EnvironmentService(
     private val environmentRepository: EnvironmentRepository,
     private val roomRepository: RoomRepository,
     private val deviceRepository: DeviceRepository,
-    private val userRepository: UserRepository
+    private val userRepository: UserRepository,
+    private val reportRepository: ReportRepository
 ) {
     private val log = LoggerFactory.getLogger(EnvironmentService::class.java)
 
@@ -69,6 +71,9 @@ class EnvironmentService(
 
     fun delete(ownerId: Long, id: Long) {
         val env = findOwned(ownerId, id)
+        // D33: relatórios dos cômodos e do ambiente mantêm o nome, sem o vínculo
+        env.rooms.forEach { room -> reportRepository.unlinkRoom(room.id!!) }
+        reportRepository.unlinkEnvironment(id)
         // Devices deste ambiente não são apagados, só ficam sem ambiente e sem room
         env.rooms.forEach { room -> unbindDevices(room.id!!) }
         deviceRepository.findAllByEnvironmentId(id).forEach {
@@ -119,6 +124,7 @@ class EnvironmentService(
         val env = findOwned(ownerId, environmentId)
         val room = env.rooms.find { it.id == roomId }
             ?: throw NotFoundException("Cômodo id=$roomId não encontrado neste ambiente")
+        reportRepository.unlinkRoom(roomId) // D33: relatórios mantêm o nome, sem o vínculo
         unbindDevices(roomId) // continuam no ambiente, só sem room
         env.rooms.remove(room) // orphanRemoval apaga o cômodo
         log.info("Cômodo id={} removido do ambiente id={}", roomId, environmentId)
