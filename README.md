@@ -1,6 +1,6 @@
 # AirSense Backend
 
-API REST do **AirSense**, sistema de monitoramento de qualidade do ar com dispositivos IoT. O backend cuida de usuários, autenticação, ambientes, cômodos e dispositivos, e serve de base para o app Android do projeto.
+API REST do **AirSense**, sistema de monitoramento de qualidade do ar com dispositivos IoT. O backend cuida de usuários, autenticação, ambientes, cômodos, dispositivos e relatórios, e serve de base para o app Android do projeto. As leituras dos sensores ficam em um servidor IoT separado; este backend faz a ponte com ele.
 
 Projeto acadêmico desenvolvido na PUCPR.
 
@@ -31,7 +31,7 @@ Nicolas Jacinto Grzebieniak de Oliveira
 | JDK | 21 |
 | Framework | Spring Boot 3.3.4 |
 | Persistência | Spring Data JPA + Hibernate |
-| Banco | H2 em memória |
+| Banco | H2 em arquivo (`./data/airsensedb`) |
 | Segurança | Spring Security + JWT (jjwt 0.12.5, HS256) |
 | Senhas | BCrypt |
 | Documentação | springdoc-openapi 2.6.0 (Swagger UI) |
@@ -40,12 +40,17 @@ Nicolas Jacinto Grzebieniak de Oliveira
 ## Funcionalidades
 
 - Cadastro e login de usuários com token JWT (validade de 24 horas).
+- Regra de senha: mínimo de 8 caracteres, com maiúscula, minúscula, número e caractere especial.
+- Bloqueio do login por 15 minutos após 5 senhas erradas seguidas.
+- Troca de senha e edição de nome e e-mail.
 - Dois perfis: `USER` e `ADMIN`.
 - CRUD de **ambientes** (visão macro, ex: "Casa", "Escritório") com **cômodos** (visão micro) dentro de cada um.
 - CRUD de **dispositivos** com faixas seguras configuráveis de temperatura, umidade, qualidade do ar e CO₂.
 - Vincular e desvincular dispositivos a cômodos.
-- Busca com filtros e ordenação em dispositivos e ambientes.
-- Cada usuário só enxerga os próprios ambientes e dispositivos.
+- CRUD de **relatórios** por período, com ambiente, cômodo e dispositivo opcionais, e endpoints para associar e desassociar cada um.
+- Busca com filtros e ordenação em dispositivos, ambientes e relatórios.
+- Cada usuário só enxerga os próprios ambientes, dispositivos e relatórios.
+- Health check público (`GET /health`).
 - Respostas de erro padronizadas em JSON.
 - Swagger UI com botão **Authorize** para testar rotas protegidas.
 
@@ -53,15 +58,15 @@ Nicolas Jacinto Grzebieniak de Oliveira
 
 ### Pré-requisitos
 
-- JDK 21 (o Gradle também consegue baixar via toolchain)
+- Qualquer Java instalado para iniciar o Gradle. O projeto roda sempre com o **JDK 21**: o arquivo `gradle/gradle-daemon-jvm.properties` faz o Gradle usar um JDK 21 já instalado ou baixar um automaticamente, sem depender do `JAVA_HOME`. (O Kotlin 1.9 do projeto não compila com JDK 25, como o do Android Studio.)
 - Nada de banco externo: o H2 sobe junto com a aplicação
 
 ### Passos
 
 ```bash
 # 1. Clonar o repositório
-git clone <url-do-repositorio>
-cd cagnato-backend_airsense
+git clone https://github.com/cagnato/BackEnd_AirSense.git
+cd BackEnd_AirSense
 
 # 2. Subir a aplicação
 ./gradlew bootRun          # Linux / macOS
@@ -74,17 +79,18 @@ A API sobe em `http://localhost:8080`.
 
 | O quê | URL |
 |---|---|
+| Health check | http://localhost:8080/health |
 | Swagger UI | http://localhost:8080/swagger-ui.html |
 | OpenAPI (JSON) | http://localhost:8080/v3/api-docs |
 | Console do H2 | http://localhost:8080/h2-console |
 
 No console do H2, use:
 
-- **JDBC URL:** `jdbc:h2:mem:airsensedb`
+- **JDBC URL:** `jdbc:h2:file:./data/airsensedb`
 - **User:** `sa`
 - **Password:** (vazio)
 
-Como o banco é em memória, **os dados são perdidos toda vez que a aplicação reinicia**.
+Os dados ficam na pasta `data/` (fora do git) e **continuam lá quando a aplicação reinicia**. Para começar do zero, pare a aplicação e apague essa pasta.
 
 ## Configuração
 
@@ -94,17 +100,19 @@ Tudo fica em `src/main/resources/application.yaml`.
 |---|---|---|
 | `server.port` | Porta da API | `8080` |
 | `airsense.admin.email` | E-mail do admin criado na inicialização | `admin@airsense.com` |
-| `airsense.admin.password` | Senha do admin inicial | `admin123` |
+| `airsense.admin.password` | Senha do admin inicial | `Admin@123` |
 | `airsense.jwt.secret` | Chave para assinar os tokens (mínimo 32 caracteres) | definida no arquivo |
 | `spring.jpa.hibernate.ddl-auto` | Criação/atualização das tabelas | `update` |
 
-Na primeira subida, o `BootStrapper` cria as roles `USER` e `ADMIN` e o usuário administrador inicial (se ele ainda não existir).
+Na primeira subida, o `BootStrapper` cria as roles `USER` e `ADMIN` e o usuário administrador inicial (se ele ainda não existir). Como o admin só é criado uma vez, mudar a senha no arquivo não altera um admin que já está no banco.
 
 ## Autenticação
 
 A autenticação é feita com JWT no header `Authorization`.
 
 **1. Criar conta** (rota pública)
+
+A senha precisa ter no mínimo 8 caracteres, com letra maiúscula, letra minúscula, número e caractere especial.
 
 ```http
 POST /users
@@ -113,7 +121,7 @@ Content-Type: application/json
 {
   "name": "Maria",
   "email": "maria@email.com",
-  "password": "senha123"
+  "password": "Senha@123"
 }
 ```
 
@@ -125,7 +133,7 @@ Content-Type: application/json
 
 {
   "username": "maria@email.com",
-  "password": "senha123"
+  "password": "Senha@123"
 }
 ```
 
@@ -151,6 +159,7 @@ Detalhes que valem saber:
 - O filtro confere o usuário no banco a cada requisição. Se o usuário for apagado, o token deixa de funcionar na hora.
 - As roles usadas são as atuais do banco, não as que estavam gravadas no token.
 - E-mails são normalizados (sem espaços e em minúsculas).
+- Depois de 5 senhas erradas seguidas, o login fica bloqueado por 15 minutos (resposta `423`). Uma senha certa zera o contador.
 
 ## Endpoints
 
@@ -165,8 +174,9 @@ Todas as rotas exigem token, exceto as marcadas como públicas.
 | GET | `/users/me` | Autenticado | Dados do usuário logado |
 | GET | `/users` | `ADMIN` | Lista todos os usuários |
 | GET | `/users/{id}` | Dono ou `ADMIN` | Busca um usuário |
-| PUT | `/users/{id}` | Dono ou `ADMIN` | Atualiza o nome |
-| DELETE | `/users/{id}` | Dono ou `ADMIN` | Remove o usuário e seus dispositivos e ambientes |
+| PUT | `/users/{id}` | Dono ou `ADMIN` | Atualiza o nome e, se enviado, o e-mail |
+| PUT | `/users/{id}/password` | Dono ou `ADMIN` | Troca a senha (`currentPassword`, `newPassword`) |
+| DELETE | `/users/{id}` | Dono ou `ADMIN` | Remove o usuário e seus relatórios, dispositivos e ambientes |
 | PUT | `/users/{id}/roles/{role}` | `ADMIN` | Adiciona uma role ao usuário |
 
 Regras: usuário comum que tenta acessar outro id recebe `404`. Não dá para remover o último administrador.
@@ -176,16 +186,20 @@ Regras: usuário comum que tenta acessar outro id recebe `404`. Não dá para re
 | Método | Rota | Descrição |
 |---|---|---|
 | POST | `/environments` | Cria um ambiente |
-| GET | `/environments` | Lista com filtros `name`, `city` e ordenação |
+| GET | `/environments` | Lista com filtro `name` e ordenação |
 | GET | `/environments/{id}` | Busca um ambiente (com seus cômodos) |
 | PUT | `/environments/{id}` | Atualiza o ambiente |
-| DELETE | `/environments/{id}` | Remove o ambiente (dispositivos ficam sem ambiente e sem cômodo) |
+| DELETE | `/environments/{id}` | Remove o ambiente e seus cômodos (dispositivos ficam sem ambiente e sem cômodo) |
 | POST | `/environments/{id}/rooms` | Adiciona um cômodo |
 | GET | `/environments/{id}/rooms` | Lista os cômodos |
 | PUT | `/environments/{id}/rooms/{roomId}` | Atualiza um cômodo |
 | DELETE | `/environments/{id}/rooms/{roomId}` | Remove um cômodo (dispositivos continuam no ambiente) |
 
-Ordenação de ambientes: `sortBy` = `id`, `name` ou `city`.
+Ordenação de ambientes: `sortBy` = `id` ou `name`; `sortDir` = `asc` ou `desc`.
+
+Ambiente tem `name` (obrigatório) e `description` (opcional). Cômodo tem `name`, `description` (opcional) e `areaM2` (maior que zero). Não pode haver dois ambientes com o mesmo nome para o mesmo usuário, nem dois cômodos com o mesmo nome no mesmo ambiente (`409`).
+
+Excluir um ambiente ou cômodo não apaga os relatórios que o usam: o vínculo fica vazio e o relatório guarda o nome.
 
 ### Dispositivos (`/devices`)
 
@@ -219,20 +233,58 @@ Exemplo de criação:
 }
 ```
 
-Se o `deviceId` não for enviado, o servidor gera um no formato `DEV-XXXXXXXX`.
+Se o `deviceId` não for enviado, o servidor gera um no formato `DEV-XXXXXXXX`. O `deviceId` é único no sistema, sem diferenciar maiúsculas (`409` "Dispositivo já cadastrado.").
+
+Excluir um dispositivo não apaga os relatórios que o usam: o vínculo fica vazio e o relatório guarda o nome.
+
+### Relatórios (`/reports`)
+
+| Método | Rota | Descrição |
+|---|---|---|
+| POST | `/reports` | Cria um relatório |
+| GET | `/reports` | Lista com filtros e ordenação |
+| GET | `/reports/{id}` | Busca um relatório |
+| PUT | `/reports/{id}` | Substitui período e vínculos |
+| DELETE | `/reports/{id}` | Exclui o relatório |
+| PUT / DELETE | `/reports/{id}/environment/{environmentId}` | Associa ou desassocia um ambiente |
+| PUT / DELETE | `/reports/{id}/room/{roomId}` | Associa ou desassocia um cômodo |
+| PUT / DELETE | `/reports/{id}/device/{deviceId}` | Associa ou desassocia um dispositivo |
+
+**Filtros da listagem:** `startDate`, `endDate` (formato `AAAA-MM-DD`), `environmentId`, `roomId`, `deviceId`.
+
+**Ordenação:** `sortBy` = `id`, `startDate`, `endDate` ou `createdAt` (padrão `createdAt`); `sortDir` = `asc` ou `desc` (padrão `desc`).
+
+Regras:
+- `startDate` e `endDate` são obrigatórios; data final antes da inicial responde `400` "Período inválido.".
+- Ambiente, cômodo e dispositivo são opcionais, mas precisam ser do usuário; o cômodo precisa ser do ambiente e o dispositivo precisa estar no cômodo ou ambiente informados.
+- O relatório guarda um resumo (mínimo, média e máximo de cada medida e leituras fora da faixa) e a data em que foi gerado. Os números são preenchidos quando houver leituras do servidor IoT.
+
+Exemplo de criação:
+
+```json
+{
+  "startDate": "2026-11-01",
+  "endDate": "2026-11-07",
+  "environmentId": 1,
+  "roomId": 3
+}
+```
 
 ## Modelo de dados
 
 ```
 User ──< Environment ──< Room
   │            │            │
-  └──< Device >┴────────────┘
+  ├──< Device >┴────────────┘
+  │
+  └──< Report  (Environment, Room e Device opcionais)
 ```
 
-- **User**: e-mail único, senha em BCrypt, roles (`USER`, `ADMIN`).
-- **Environment**: nome, descrição, cidade, dono, lista de cômodos.
-- **Room**: nome, área em m², ambiente.
+- **User**: e-mail único, senha em BCrypt, roles (`USER`, `ADMIN`), controle de tentativas de login.
+- **Environment**: nome, descrição, dono, lista de cômodos.
+- **Room**: nome, descrição, área em m², ambiente.
 - **Device**: `deviceId` único, nome, status, faixas seguras, dono, ambiente e cômodo opcionais.
+- **Report**: dono, período (início e fim), ambiente, cômodo e dispositivo opcionais (com os nomes guardados), resumo das leituras e data de geração.
 
 ### Faixas seguras de um dispositivo
 
@@ -265,7 +317,8 @@ Todos os erros seguem o mesmo formato:
 | 403 | Sem permissão para o recurso |
 | 404 | Recurso não existe (ou não pertence ao usuário) |
 | 405 / 415 | Método ou Content-Type não suportado |
-| 409 | E-mail ou `deviceId` já existente, violação de integridade |
+| 409 | E-mail, `deviceId` ou nome de ambiente/cômodo já existente, violação de integridade |
+| 423 | Login bloqueado após 5 senhas erradas (por 15 minutos) |
 | 500 | Erro inesperado |
 
 ## Estrutura do projeto
@@ -274,11 +327,13 @@ Todos os erros seguem o mesmo formato:
 src/main/kotlin/br/pucpr/airsense/
 ├── AirSenseApplication.kt     # Ponto de entrada
 ├── BootStrapper.kt            # Cria roles e admin inicial
+├── HealthController.kt        # GET /health
 ├── OpenApiConfig.kt           # Swagger com autenticação Bearer
-├── common/                    # Utilitários (ordenação)
+├── common/                    # Utilitários (ordenação, limpeza de texto no JSON)
 ├── devices/                   # Controller, service, repository e modelos de dispositivos
 ├── environments/              # Ambientes e cômodos
 ├── exception/                 # Exceções de negócio e handler global
+├── reports/                   # Relatórios
 ├── security/                  # JWT, filtro, config de segurança
 └── users/                     # Usuários e roles
 ```
@@ -291,4 +346,14 @@ O código segue a divisão por domínio, e cada um tem controller, service, repo
 ./gradlew test
 ```
 
-Hoje existe apenas o teste `contextLoads`, que confirma que o contexto do Spring sobe sem erro.
+Testes atuais:
+- `AirSenseApplicationTests.contextLoads`: confirma que o contexto do Spring sobe sem erro (usa um H2 em memória, sem mexer na pasta `data/`).
+- `SortingTest`: regras de ordenação (campo permitido, direção e desempate pelo id).
+
+## Observações para produção
+
+O projeto está configurado para desenvolvimento local. Antes de publicar:
+- Trocar o `airsense.jwt.secret` e a senha do admin (de preferência por variáveis de ambiente).
+- Trocar o H2 por um banco de verdade (ex.: PostgreSQL) e desligar o console do H2 (`spring.h2.console.enabled: false`).
+- Restringir o CORS, que hoje aceita qualquer origem.
+- Usar HTTPS.

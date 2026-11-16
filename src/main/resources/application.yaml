@@ -22,7 +22,7 @@ server:
 airsense:
   admin:
     email: admin@airsense.com
-    password: admin123
+    password: Admin@123
   jwt:
     # Mínimo de 32 caracteres (HS256). Troque fora do ambiente local.
     secret: chave-secreta-airsense-pucpr-muito-segura-256bits

@@ -57,8 +57,9 @@ data class EnvironmentRequest(
     @field:Size(max = 100, message = "O nome deve ter no máximo 100 caracteres")
     val name: String,
 
+    // Opcional: sem descrição, fica vazia (o app não exige)
     @field:Size(max = 255, message = "A descrição deve ter no máximo 255 caracteres")
-    val description: String,
+    val description: String = "",
 )
 
 data class RoomRequest(
