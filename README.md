@@ -45,7 +45,8 @@ Nicolas Jacinto Grzebieniak de Oliveira
 - Troca de senha e edição de nome e e-mail.
 - Dois perfis: `USER` e `ADMIN`.
 - CRUD de **ambientes** (visão macro, ex: "Casa", "Escritório") com **cômodos** (visão micro) dentro de cada um.
-- CRUD de **dispositivos** com faixas seguras configuráveis de temperatura, umidade, qualidade do ar e CO₂.
+- CRUD de **dispositivos**.
+- **Faixas seguras** (temperatura, umidade, qualidade do ar e CO₂) opcionais por ambiente, cômodo e dispositivo, com herança: vale a mais específica definida.
 - Vincular e desvincular dispositivos a cômodos.
 - CRUD de **relatórios** por período, com ambiente, cômodo e dispositivo opcionais, e endpoints para associar e desassociar cada um.
 - Busca com filtros e ordenação em dispositivos, ambientes e relatórios.
@@ -60,6 +61,7 @@ Nicolas Jacinto Grzebieniak de Oliveira
 
 - Qualquer Java instalado para iniciar o Gradle. O projeto roda sempre com o **JDK 21**: o arquivo `gradle/gradle-daemon-jvm.properties` faz o Gradle usar um JDK 21 já instalado ou baixar um automaticamente, sem depender do `JAVA_HOME`. (O Kotlin 1.9 do projeto não compila com JDK 25, como o do Android Studio.)
 - Nada de banco externo: o H2 sobe junto com a aplicação
+- Se você já rodava uma versão anterior (antes das faixas seguras virarem uma tabela própria), **apague a pasta `data/`** antes de subir: o `ddl-auto: update` não remove as colunas antigas de limites da tabela de dispositivos, e o cadastro de dispositivo falharia.
 
 ### Passos
 
@@ -227,15 +229,44 @@ Exemplo de criação:
   "status": "ACTIVE",
   "environmentId": 1,
   "roomId": 3,
-  "tempMinSafe": 18.0,
-  "tempMaxSafe": 26.0,
-  "co2MaxSafe": 1000.0
+  "limits": {
+    "tempMinSafe": 18.0, "tempMaxSafe": 26.0,
+    "humidityMinSafe": 30.0, "humidityMaxSafe": 60.0,
+    "airQualityMinSafe": 0.0, "airQualityMaxSafe": 100.0,
+    "co2MinSafe": 400.0, "co2MaxSafe": 1000.0
+  }
 }
 ```
+
+O `limits` é opcional (ver [Faixas seguras](#faixas-seguras)). Como o `PUT` substitui o dispositivo inteiro, enviar sem `limits` remove os limites próprios e ele passa a herdar.
 
 Se o `deviceId` não for enviado, o servidor gera um no formato `DEV-XXXXXXXX`. O `deviceId` é único no sistema, sem diferenciar maiúsculas (`409` "Dispositivo já cadastrado.").
 
 Excluir um dispositivo não apaga os relatórios que o usam: o vínculo fica vazio e o relatório guarda o nome.
+
+### Faixas seguras (`/limits`)
+
+| Método | Rota | Descrição |
+|---|---|---|
+| GET / PUT / DELETE | `/environments/{id}/limits` | Ver, definir ou remover os limites próprios do ambiente |
+| GET / PUT / DELETE | `/environments/{id}/rooms/{roomId}/limits` | O mesmo para o cômodo |
+| GET / PUT / DELETE | `/devices/{id}/limits` | O mesmo para o dispositivo |
+
+O `PUT` recebe as 8 faixas (todas obrigatórias) e o `DELETE` responde `404` se não houver limites próprios. O `GET` e o `PUT` respondem:
+
+```json
+{
+  "limits": { "tempMinSafe": 18.0, "...": "..." },
+  "effectiveLimits": { "tempMinSafe": 18.0, "...": "..." },
+  "limitsSource": "ROOM"
+}
+```
+
+- `limits`: os limites próprios daquele nível (ou `null`).
+- `effectiveLimits`: os que valem de fato.
+- `limitsSource`: de onde vêm os que valem — `DEVICE`, `ROOM`, `ENVIRONMENT` ou `DEFAULT` (padrão do sistema).
+
+As respostas de ambiente, cômodo e dispositivo trazem os mesmos três campos. Ambiente e cômodo também aceitam `limits` no corpo do `POST` e do `PUT`, como o dispositivo.
 
 ### Relatórios (`/reports`)
 
@@ -278,15 +309,24 @@ User ──< Environment ──< Room
   ├──< Device >┴────────────┘
   │
   └──< Report  (Environment, Room e Device opcionais)
+
+Environment, Room e Device ── 1:1 (opcional) ── SafetyLimits
 ```
 
 - **User**: e-mail único, senha em BCrypt, roles (`USER`, `ADMIN`), controle de tentativas de login.
-- **Environment**: nome, descrição, dono, lista de cômodos.
-- **Room**: nome, descrição, área em m², ambiente.
-- **Device**: `deviceId` único, nome, status, faixas seguras, dono, ambiente e cômodo opcionais.
+- **Environment**: nome, descrição, dono, lista de cômodos, limites opcionais.
+- **Room**: nome, descrição, área em m², ambiente, limites opcionais.
+- **Device**: `deviceId` único, nome, status, dono, ambiente e cômodo opcionais, limites opcionais.
+- **SafetyLimits**: mínimo e máximo de temperatura, umidade, qualidade do ar e CO₂. Apagada junto com o dono.
 - **Report**: dono, período (início e fim), ambiente, cômodo e dispositivo opcionais (com os nomes guardados), resumo das leituras e data de geração.
 
-### Faixas seguras de um dispositivo
+### Faixas seguras
+
+Ambiente, cômodo e dispositivo podem ter limites próprios, todos opcionais. Vale o mais específico definido:
+
+```
+Dispositivo  ->  Cômodo  ->  Ambiente  ->  Padrão do sistema
+```
 
 | Medida | Padrão (mín – máx) | Limite aceito |
 |---|---|---|
@@ -295,7 +335,7 @@ User ──< Environment ──< Room
 | Qualidade do ar | 0 – 100 | 0 a 500 |
 | CO₂ (ppm) | 400 – 1000 | 300 a 5000 |
 
-O mínimo nunca pode ser maior que o máximo, senão a API responde `400`.
+O mínimo precisa ser **menor** que o máximo; se não for, a API responde `400` "O valor mínimo deve ser menor que o máximo.".
 
 ## Tratamento de erros
 
@@ -333,6 +373,7 @@ src/main/kotlin/br/pucpr/airsense/
 ├── devices/                   # Controller, service, repository e modelos de dispositivos
 ├── environments/              # Ambientes e cômodos
 ├── exception/                 # Exceções de negócio e handler global
+├── limits/                    # Faixas seguras (SafetyLimits) e herança
 ├── reports/                   # Relatórios
 ├── security/                  # JWT, filtro, config de segurança
 └── users/                     # Usuários e roles
@@ -349,6 +390,7 @@ O código segue a divisão por domínio, e cada um tem controller, service, repo
 Testes atuais:
 - `AirSenseApplicationTests.contextLoads`: confirma que o contexto do Spring sobe sem erro (usa um H2 em memória, sem mexer na pasta `data/`).
 - `SortingTest`: regras de ordenação (campo permitido, direção e desempate pelo id).
+- `SafetyLimitsRulesTest`: validação das faixas, criar/atualizar/remover limites e a herança (dispositivo -> cômodo -> ambiente -> padrão).
 
 ## Observações para produção
 

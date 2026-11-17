@@ -6,8 +6,13 @@ import br.pucpr.airsense.users.User
 import com.fasterxml.jackson.annotation.JsonCreator
 import com.fasterxml.jackson.annotation.JsonValue
 import jakarta.persistence.*
-import jakarta.validation.constraints.DecimalMax
-import jakarta.validation.constraints.DecimalMin
+import br.pucpr.airsense.limits.LimitsSource
+import br.pucpr.airsense.limits.LimitsView
+import br.pucpr.airsense.limits.SafetyLimits
+import br.pucpr.airsense.limits.SafetyLimitsRequest
+import br.pucpr.airsense.limits.SafetyLimitsResponse
+import br.pucpr.airsense.limits.SafetyLimitsRules
+import jakarta.validation.Valid
 import jakarta.validation.constraints.NotBlank
 import jakarta.validation.constraints.Size
 
@@ -42,18 +47,6 @@ class DeviceStatusConverter : AttributeConverter<DeviceStatus, Int> {
         dbData?.let { code -> DeviceStatus.entries.first { it.code == code } }
 }
 
-// Limites absolutos das faixas
-object ReadingLimits {
-    const val TEMP_MIN = "-10.0"
-    const val TEMP_MAX = "50.0"
-    const val HUMIDITY_MIN = "0.0"
-    const val HUMIDITY_MAX = "100.0"
-    const val AIR_QUALITY_MIN = "0.0"
-    const val AIR_QUALITY_MAX = "500.0"
-    const val CO2_MIN = "300.0"
-    const val CO2_MAX = "5000.0"
-}
-
 // Entidade atualizada para refletir o app
 @Entity
 @Table(name = "tbl_devices")
@@ -71,14 +64,10 @@ class Device(
     @Column(nullable = false)
     var status: DeviceStatus = DeviceStatus.ACTIVE,
 
-    @Column(nullable = false) var tempMinSafe: Double = 18.0,
-    @Column(nullable = false) var tempMaxSafe: Double = 26.0,
-    @Column(nullable = false) var humidityMinSafe: Double = 30.0,
-    @Column(nullable = false) var humidityMaxSafe: Double = 60.0,
-    @Column(nullable = false) var airQualityMinSafe: Double = 0.0,
-    @Column(nullable = false) var airQualityMaxSafe: Double = 100.0,
-    @Column(nullable = false) var co2MinSafe: Double = 400.0,
-    @Column(nullable = false) var co2MaxSafe: Double = 1000.0,
+    // Limites próprios (opcionais). Sem eles, valem os do cômodo, do ambiente ou o padrão.
+    @OneToOne(cascade = [CascadeType.ALL], orphanRemoval = true, fetch = FetchType.LAZY)
+    @JoinColumn(name = "limits_id", unique = true)
+    var limits: SafetyLimits? = null,
 
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
     @JoinColumn(name = "owner_id", nullable = false)
@@ -112,25 +101,9 @@ data class DeviceRequest(
     // Opcional. Se informado, o ambiente do device passa a ser o do cômodo.
     val roomId: Long? = null,
 
-    @field:DecimalMin(ReadingLimits.TEMP_MIN) @field:DecimalMax(ReadingLimits.TEMP_MAX)
-    val tempMinSafe: Double = 18.0,
-    @field:DecimalMin(ReadingLimits.TEMP_MIN) @field:DecimalMax(ReadingLimits.TEMP_MAX)
-    val tempMaxSafe: Double = 26.0,
-
-    @field:DecimalMin(ReadingLimits.HUMIDITY_MIN) @field:DecimalMax(ReadingLimits.HUMIDITY_MAX)
-    val humidityMinSafe: Double = 30.0,
-    @field:DecimalMin(ReadingLimits.HUMIDITY_MIN) @field:DecimalMax(ReadingLimits.HUMIDITY_MAX)
-    val humidityMaxSafe: Double = 60.0,
-
-    @field:DecimalMin(ReadingLimits.AIR_QUALITY_MIN) @field:DecimalMax(ReadingLimits.AIR_QUALITY_MAX)
-    val airQualityMinSafe: Double = 0.0,
-    @field:DecimalMin(ReadingLimits.AIR_QUALITY_MIN) @field:DecimalMax(ReadingLimits.AIR_QUALITY_MAX)
-    val airQualityMaxSafe: Double = 100.0,
-
-    @field:DecimalMin(ReadingLimits.CO2_MIN) @field:DecimalMax(ReadingLimits.CO2_MAX)
-    val co2MinSafe: Double = 400.0,
-    @field:DecimalMin(ReadingLimits.CO2_MIN) @field:DecimalMax(ReadingLimits.CO2_MAX)
-    val co2MaxSafe: Double = 1000.0
+    // Opcional. Nulo = sem limites próprios (herda do cômodo, do ambiente ou o padrão).
+    @field:Valid
+    val limits: SafetyLimitsRequest? = null
 )
 
 data class DeviceResponse(
@@ -143,16 +116,11 @@ data class DeviceResponse(
     val environmentName: String?,
     val roomId: Long?,
     val roomName: String?,
-    val tempMinSafe: Double,
-    val tempMaxSafe: Double,
-    val humidityMinSafe: Double,
-    val humidityMaxSafe: Double,
-    val airQualityMinSafe: Double,
-    val airQualityMaxSafe: Double,
-    val co2MinSafe: Double,
-    val co2MaxSafe: Double
+    val limits: SafetyLimitsResponse?,
+    val effectiveLimits: SafetyLimitsResponse,
+    val limitsSource: LimitsSource
 ) {
-    constructor(device: Device) : this(
+    private constructor(device: Device, view: LimitsView) : this(
         id = device.id!!,
         deviceId = device.deviceId,
         name = device.name,
@@ -162,13 +130,14 @@ data class DeviceResponse(
         environmentName = device.environment?.name,
         roomId = device.room?.id,
         roomName = device.room?.name,
-        tempMinSafe = device.tempMinSafe,
-        tempMaxSafe = device.tempMaxSafe,
-        humidityMinSafe = device.humidityMinSafe,
-        humidityMaxSafe = device.humidityMaxSafe,
-        airQualityMinSafe = device.airQualityMinSafe,
-        airQualityMaxSafe = device.airQualityMaxSafe,
-        co2MinSafe = device.co2MinSafe,
-        co2MaxSafe = device.co2MaxSafe
+        limits = view.limits,
+        effectiveLimits = view.effectiveLimits,
+        limitsSource = view.limitsSource
     )
+
+    constructor(device: Device) : this(device, device.limitsView())
 }
+
+/** Limites próprios do dispositivo e os que valem (dispositivo -> cômodo -> ambiente -> padrão). */
+fun Device.limitsView(): LimitsView =
+    SafetyLimitsRules.view(own = limits, device = limits, room = room?.limits, environment = environment?.limits)

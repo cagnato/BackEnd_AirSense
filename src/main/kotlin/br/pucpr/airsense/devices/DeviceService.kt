@@ -6,6 +6,7 @@ import br.pucpr.airsense.environments.RoomRepository
 import br.pucpr.airsense.exception.BadRequestException
 import br.pucpr.airsense.exception.ConflictException
 import br.pucpr.airsense.exception.NotFoundException
+import br.pucpr.airsense.limits.SafetyLimitsRules
 import br.pucpr.airsense.users.UserRepository
 import br.pucpr.airsense.reports.ReportRepository
 import org.slf4j.LoggerFactory
@@ -37,8 +38,6 @@ class DeviceService(
     }
 
     fun create(ownerId: Long, req: DeviceRequest): DeviceResponse {
-        validateRanges(req)
-
         val deviceId = req.deviceId?.trim().takeUnless { it.isNullOrEmpty() } ?: generateDeviceId()
         if (deviceRepository.existsByDeviceIdIgnoreCase(deviceId)) {
             throw ConflictException(DEVICE_ID_CONFLICT)
@@ -83,7 +82,6 @@ class DeviceService(
 
     // Substitui o device inteiro, como o app faz ao salvar (inclui ambiente e cômodo).
     fun update(ownerId: Long, id: Long, req: DeviceRequest): DeviceResponse {
-        validateRanges(req)
         val device = findOwned(ownerId, id)
 
         // deviceId vazio no update mantém o atual
@@ -138,14 +136,8 @@ class DeviceService(
     private fun applyRequest(ownerId: Long, device: Device, req: DeviceRequest) {
         device.name = req.name.trim()
         device.status = req.status
-        device.tempMinSafe = req.tempMinSafe
-        device.tempMaxSafe = req.tempMaxSafe
-        device.humidityMinSafe = req.humidityMinSafe
-        device.humidityMaxSafe = req.humidityMaxSafe
-        device.airQualityMinSafe = req.airQualityMinSafe
-        device.airQualityMaxSafe = req.airQualityMaxSafe
-        device.co2MinSafe = req.co2MinSafe
-        device.co2MaxSafe = req.co2MaxSafe
+        // PUT substitui o device inteiro: limits nulo remove os limites próprios (passa a herdar).
+        device.limits = SafetyLimitsRules.merge(device.limits, req.limits, "do dispositivo ${device.deviceId}")
         applyLocation(ownerId, device, req.environmentId, req.roomId)
     }
 
@@ -166,17 +158,4 @@ class DeviceService(
                 ?: throw NotFoundException("Ambiente com id=$it não encontrado")
         }
     }
-
-    private fun validateRanges(req: DeviceRequest) {
-        val errors = listOfNotNull(
-            rangeError("temp", req.tempMinSafe, req.tempMaxSafe),
-            rangeError("humidity", req.humidityMinSafe, req.humidityMaxSafe),
-            rangeError("airQuality", req.airQualityMinSafe, req.airQualityMaxSafe),
-            rangeError("co2", req.co2MinSafe, req.co2MaxSafe)
-        )
-        if (errors.isNotEmpty()) throw BadRequestException(errors.joinToString("; "))
-    }
-
-    private fun rangeError(field: String, min: Double, max: Double): String? =
-        if (min > max) "${field}MinSafe ($min) não pode ser maior que ${field}MaxSafe ($max)" else null
 }

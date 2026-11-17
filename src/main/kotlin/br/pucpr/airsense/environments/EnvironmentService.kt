@@ -5,6 +5,7 @@ import br.pucpr.airsense.devices.DeviceRepository
 import br.pucpr.airsense.exception.BadRequestException
 import br.pucpr.airsense.exception.ConflictException
 import br.pucpr.airsense.exception.NotFoundException
+import br.pucpr.airsense.limits.SafetyLimitsRules
 import br.pucpr.airsense.users.UserRepository
 import br.pucpr.airsense.reports.ReportRepository
 import org.slf4j.LoggerFactory
@@ -37,7 +38,8 @@ class EnvironmentService(
         val env = Environment(
             name = name,
             description = req.description.trim(),
-            owner = userRepository.getReferenceById(ownerId)
+            owner = userRepository.getReferenceById(ownerId),
+            limits = SafetyLimitsRules.merge(null, req.limits, "do ambiente '$name'")
         )
         val saved = environmentRepository.save(env)
         log.info("Ambiente Macro criado: id={}, name={}, owner={}", saved.id, saved.name, ownerId)
@@ -63,6 +65,8 @@ class EnvironmentService(
         }
         env.name = name
         env.description = req.description.trim()
+        // PUT substitui o ambiente: limits nulo remove os limites próprios.
+        env.limits = SafetyLimitsRules.merge(env.limits, req.limits, "do ambiente id=$id")
 
         val saved = environmentRepository.save(env)
         log.info("Ambiente atualizado: id={}", saved.id)
@@ -93,7 +97,13 @@ class EnvironmentService(
             throw ConflictException(ROOM_NAME_CONFLICT)
         }
         val room = roomRepository.save(
-            Room(name = name, description = req.description.trim(), areaM2 = req.areaM2, environment = env)
+            Room(
+                name = name,
+                description = req.description.trim(),
+                areaM2 = req.areaM2,
+                environment = env,
+                limits = SafetyLimitsRules.merge(null, req.limits, "do cômodo '$name'")
+            )
         )
         env.rooms.add(room)
         log.info("Cômodo '{}' adicionado ao ambiente id={}", name, environmentId)
@@ -115,6 +125,8 @@ class EnvironmentService(
         room.name = name
         room.description = req.description.trim()
         room.areaM2 = req.areaM2
+        // PUT substitui o cômodo: limits nulo remove os limites próprios.
+        room.limits = SafetyLimitsRules.merge(room.limits, req.limits, "do cômodo id=$roomId")
         val saved = roomRepository.save(room)
         log.info("Cômodo id={} atualizado no ambiente id={}", roomId, environmentId)
         return RoomResponse(saved)
