@@ -9,6 +9,9 @@ Edgar Felipe Polswut
 Davi Cagnato Pinto
 Nicolas Jacinto Grzebieniak de Oliveira
 
+Link do vídeo:
+https://youtu.be/Jo844GfcvTA
+
 ## Sumário
 
 - [Tecnologias](#tecnologias)
