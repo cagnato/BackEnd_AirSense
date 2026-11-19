@@ -5,9 +5,9 @@ API REST do **AirSense**, sistema de monitoramento de qualidade do ar com dispos
 Projeto acadêmico desenvolvido na PUCPR.
 
 Alunos:
-Edgar Felipe Polswut
-Davi Cagnato Pinto
-Nicolas Jacinto Grzebieniak de Oliveira
+Edgar Felipe Polswut,
+Davi Cagnato Pinto,
+Nicolas Jacinto Grzebieniak de Oliveira.
 
 Link do vídeo:
 https://youtu.be/Jo844GfcvTA
